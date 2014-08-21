@@ -30,10 +30,6 @@ __This is the recommended way of installing.__
 
         - Ubuntu: apt-get install libcurl4-openssl-dev
         - CentOS: yum install libcurl-devel.x86_64
-3. libpam:
-
-        - Ubuntu: apt-get install libpam0g-dev
-        - CentOS: yum install pam-devel.x86_64
 
 ##### Compiling and installing
 
@@ -54,51 +50,6 @@ __This is the recommended way of installing.__
 4. Restart your server (see below).
 
 5. Start adding users using `sudo authy-vpn-add-user` (see below).
-
-#### Using Ubuntu and Debian packages
-
-__We recommend you install using the source code instead. This package
-might not be up to date.__
-
-1. Download the deb package.
-
-        curl 'https://github.com/authy/authy-openvpn/blob/master/packages/deb/authy-openvpn.deb?raw=true' -o authy-openvpn.deb
-
-2. Move your OpenVPN config file to /etc/openvpn/server.conf
-
-        sudo mv /etc/openvpn/[your-openvpn].conf /etc/openvpn/server.conf
-
-3. Install debian package.
-
-        sudo dpkg -i authy-openvpn.deb
-
-        During installation you will be asked your API Key
-
-4. Restart your server (see below).
-
-5. Start adding users using `sudo authy-vpn-add-user` (see below)
-
-
-#### CentOS and RedHat based systems
-
-__We recommend you install using the source code instead.__
-
-1. Download the rpm package.
-
-        curl 'https://github.com/authy/authy-openvpn/blob/master/packages/rpm/authy-openvpn.rpm?raw=true' -o authy-openvpn.rpm
-
-2. Install package.
-
-        rpm -i authy-openvpn.rpm
-
-3. Finally configure the plugin.
-
-        bash /usr/lib/authy/post-install
-
-
-4. Restart your server (see below).
-
-5. Start adding users using `sudo authy-vpn-add-user` (see below)
 
 ####  Windows install
 
@@ -206,11 +157,16 @@ To use PAM simply answer that you are going to use PAM during the
 
 #### After run the post-install script your server.conf should have the following lines:
 
-  # This line was added by the authy-openvpn installer
-  plugin /usr/lib/authy/authy-openvpn.so https://api.authy.com/protected/json [YOUR_API_KEY] pam
+    # This line was added by the authy-openvpn installer
+    plugin /usr/lib/authy/authy-openvpn.so https://api.authy.com/protected/json [YOUR_API_KEY] pam
 
-  # This line was added by the authy-openvpn installer
-  plugin /usr/lib/authy/pam.so "login login USERNAME password PASSWORD"
+Make sure your pam openvpn plugin is loaded after the authy openvpn plugin.
+Plugins are loaded in the order they appear in the config file, the result should look like:
+
+    # This line was added by the authy-openvpn installer
+    plugin /usr/lib/authy/authy-openvpn.so https://api.authy.com/protected/json [YOUR_API_KEY] pam
+
+    plugin /usr/lib/openvpn/openvpn-auth-pam.so "login login USERNAME password PASSWORD"
 
 
 Also your users will need to separate the password from the token during login
