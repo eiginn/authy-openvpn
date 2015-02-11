@@ -38,11 +38,13 @@
 
 #define AUTHYID_LEN 16
 #define AUTHYTOKEN_LEN 16
+#define IPADDRESS_LEN 16
 #define AUTHCACHE_MAX 1024
 
 struct auth_cache {
   char authyID[AUTHYID_LEN];
   char authyToken[AUTHYTOKEN_LEN];
+  char ipAddress[IPADDRESS_LEN];
   time_t timestamp;
 };
 
@@ -242,10 +244,10 @@ findAuthCacheSlot(struct plugin_context *context, char *pszAuthyId)
 }
 
 //
-// Update or add new cache slot with Authy ID, Token and current timestamp
+// Update or add new cache slot with Authy ID, token, IP address and current timestamp
 //
 static int
-updateAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken)
+updateAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken, char *pszIpAddress)
 {
   int cacheSlot = findAuthCacheSlot(context, pszAuthyId);
 
@@ -263,19 +265,20 @@ updateAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken
 
   strncpy(context->authCache[cacheSlot].authyID, pszAuthyId, AUTHYID_LEN - 1);
   strncpy(context->authCache[cacheSlot].authyToken, pszToken, AUTHYTOKEN_LEN - 1);
+  strncpy(context->authCache[cacheSlot].ipAddress, pszIpAddress, IPADDRESS_LEN - 1);
   context->authCache[cacheSlot].timestamp = time(NULL);
 
-  trace(INFO, __LINE__, "[Authy] AuthCache: updated slot #%d for authyID=%s with timestamp=%d.\n", 
-    cacheSlot, context->authCache[cacheSlot].authyID, context->authCache[cacheSlot].timestamp);
+  trace(INFO, __LINE__, "[Authy] AuthCache: updated slot #%d for authyID=%s with timestamp=%d and ip=%s.\n",
+    cacheSlot, context->authCache[cacheSlot].authyID, context->authCache[cacheSlot].timestamp, context->authCache[cacheSlot].ipAddress);
 
   return OK;
 }
 
 //
-// Verify Token and valid timestamp for given Authy ID in AuthCache
+// Verify valid timestamp, token and client IP address for given Authy ID in AuthCache
 //
 static int
-verifyAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken)
+verifyAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken, char *pszIpAddress)
 {
   int cacheSlot = findAuthCacheSlot(context, pszAuthyId);
 
@@ -284,7 +287,8 @@ verifyAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken
   }
 
   if (time(NULL) - context->authCache[cacheSlot].timestamp < context->authCacheTimeout &&
-      strncmp(context->authCache[cacheSlot].authyToken, pszToken, AUTHYTOKEN_LEN) == 0) {
+      strncmp(context->authCache[cacheSlot].authyToken, pszToken, AUTHYTOKEN_LEN) == 0 &&
+      strncmp(context->authCache[cacheSlot].ipAddress, pszIpAddress, IPADDRESS_LEN) == 0) {
     return OK;
   }
 
@@ -325,6 +329,7 @@ authenticate(struct plugin_context *context,
   char *pszAuthyId = NULL;
   char *pszWantedCommonName = NULL;
   char *pszTokenStartPosition = NULL;
+  char *pszIpAddress = NULL;
 
 
   trace(INFO, __LINE__, "[Authy] Authy Two-Factor Authentication started.\n");
@@ -417,15 +422,22 @@ authenticate(struct plugin_context *context,
     pszToken = pszTokenStartPosition + 1;
   }
 
-  if(context->authCacheTimeout > 0) {
-    // Skip Authy Validation, if valid AuthCache entry is found
-    r = verifyAuthCache(context, pszAuthyId, pszToken);
+  pszIpAddress = getEnv("untrusted_ip", envp);
 
-    if(SUCCESS(r)) {
-      trace(INFO, __LINE__,"[Authy] AuthCache: Valid cached auth found for authyID=%s.\n", pszAuthyId);
-      updateAuthCache(context, pszAuthyId, pszToken);
-      iAuthResult = OPENVPN_PLUGIN_FUNC_SUCCESS; //Two-Factor Auth was succesful
-      goto EXIT;
+  if(context->authCacheTimeout > 0) {
+    if(!pszIpAddress){
+      trace(INFO, __LINE__,"[Authy] AuthCache: Client IP address is NULL, skip searching for cached auth.\n");
+    } else {
+      // Skip Authy Validation, if valid AuthCache entry is found
+      r = verifyAuthCache(context, pszAuthyId, pszToken, pszIpAddress);
+
+      if(SUCCESS(r)) {
+        trace(INFO, __LINE__,"[Authy] AuthCache: Valid cached auth found for authyID=%s.\n", pszAuthyId);
+        // update timestamp for exisiting AuthCache slot
+        updateAuthCache(context, pszAuthyId, pszToken, pszIpAddress);
+        iAuthResult = OPENVPN_PLUGIN_FUNC_SUCCESS; //Two-Factor Auth was succesful
+        goto EXIT;
+      }
     }
   }
 
@@ -438,9 +450,12 @@ authenticate(struct plugin_context *context,
                   pszAuthyResponse);
 
   if (SUCCESS(r) && SUCCESS(responseWasSuccessful(pszAuthyResponse))){
-    // Update AuthCache
     if(context->authCacheTimeout > 0) {
-      updateAuthCache(context, pszAuthyId, pszToken);
+      if(!pszIpAddress){
+        trace(INFO, __LINE__,"[Authy] AuthCache: Client IP address is NULL, skip caching.\n");
+      } else {
+        updateAuthCache(context, pszAuthyId, pszToken, pszIpAddress);
+      }
     }
     iAuthResult = OPENVPN_PLUGIN_FUNC_SUCCESS; //Two-Factor Auth was succesful
     goto EXIT;
