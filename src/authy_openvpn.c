@@ -296,6 +296,10 @@ verifyAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken
     return OK;
   }
 
+  trace(INFO, __LINE__, "[Authy] AuthCache: invalid timestamp, token or client ip address for authyID=%s, purge cache slot.\n",
+    authCache->authyID);
+  memset(authCache, 0, sizeof(struct auth_cache));
+
   return FAIL;
 }
 
