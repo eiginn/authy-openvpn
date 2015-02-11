@@ -249,6 +249,7 @@ findAuthCacheSlot(struct plugin_context *context, char *pszAuthyId)
 static int
 updateAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken, char *pszIpAddress)
 {
+  struct auth_cache *authCache;
   int cacheSlot = findAuthCacheSlot(context, pszAuthyId);
 
   if (-1 == cacheSlot) {
@@ -263,13 +264,14 @@ updateAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken
     trace(INFO, __LINE__, "[Authy] AuthCache: added new slot #%d for authyID=%s.\n", cacheSlot, pszAuthyId);
   }
 
-  strncpy(context->authCache[cacheSlot].authyID, pszAuthyId, AUTHYID_LEN - 1);
-  strncpy(context->authCache[cacheSlot].authyToken, pszToken, AUTHYTOKEN_LEN - 1);
-  strncpy(context->authCache[cacheSlot].ipAddress, pszIpAddress, IPADDRESS_LEN - 1);
-  context->authCache[cacheSlot].timestamp = time(NULL);
+  authCache = &context->authCache[cacheSlot];
+  strncpy(authCache->authyID, pszAuthyId, AUTHYID_LEN - 1);
+  strncpy(authCache->authyToken, pszToken, AUTHYTOKEN_LEN - 1);
+  strncpy(authCache->ipAddress, pszIpAddress, IPADDRESS_LEN - 1);
+  authCache->timestamp = time(NULL);
 
   trace(INFO, __LINE__, "[Authy] AuthCache: updated slot #%d for authyID=%s with timestamp=%d and ip=%s.\n",
-    cacheSlot, context->authCache[cacheSlot].authyID, context->authCache[cacheSlot].timestamp, context->authCache[cacheSlot].ipAddress);
+    cacheSlot, authCache->authyID, authCache->timestamp, authCache->ipAddress);
 
   return OK;
 }
@@ -280,15 +282,17 @@ updateAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken
 static int
 verifyAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken, char *pszIpAddress)
 {
+  struct auth_cache *authCache;
   int cacheSlot = findAuthCacheSlot(context, pszAuthyId);
 
   if (cacheSlot == -1) {
     return FAIL;
   }
 
-  if (time(NULL) - context->authCache[cacheSlot].timestamp < context->authCacheTimeout &&
-      strncmp(context->authCache[cacheSlot].authyToken, pszToken, AUTHYTOKEN_LEN) == 0 &&
-      strncmp(context->authCache[cacheSlot].ipAddress, pszIpAddress, IPADDRESS_LEN) == 0) {
+  authCache = &context->authCache[cacheSlot];
+  if (time(NULL) - authCache->timestamp < context->authCacheTimeout &&
+      strncmp(authCache->authyToken, pszToken, AUTHYTOKEN_LEN) == 0 &&
+      strncmp(authCache->ipAddress, pszIpAddress, IPADDRESS_LEN) == 0) {
     return OK;
   }
 
