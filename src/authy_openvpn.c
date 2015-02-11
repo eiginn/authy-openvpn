@@ -123,6 +123,7 @@ openvpn_plugin_open_v1(unsigned int *type_mask,
 {
   /* Context Allocation */
   struct plugin_context *context;
+  char *endptr;
 
   context = (struct plugin_context *) calloc(1, sizeof(struct plugin_context));
 
@@ -157,13 +158,13 @@ openvpn_plugin_open_v1(unsigned int *type_mask,
 
   if (argv[4]){
     errno = 0;
-    context->authCacheTimeout = strtol(argv[4], (char **)NULL, 10);
+    context->authCacheTimeout = strtol(argv[4], &endptr, 10);
 
-    if(errno != 0 || context->authCacheTimeout < 0) {
-      trace(ERROR, __LINE__, "[Authy] AuthCache: incorrect AuthCache timeout value (parameter #4), AuthCache disabled.");
+    if(errno != 0 || endptr == argv[4] || context->authCacheTimeout < 0) {
+      trace(ERROR, __LINE__, "[Authy] AuthCache: incorrect AuthCache timeout value (parameter #4), AuthCache disabled.\n");
       context->authCacheTimeout = 0;
-    } else {
-      trace(INFO, __LINE__, "[Authy] AuthCache: AuthCache activated, timeout set to %ld seconds.", context->authCacheTimeout);
+    } else if (context->authCacheTimeout > 0) {
+      trace(INFO, __LINE__, "[Authy] AuthCache: AuthCache activated, timeout set to %ld seconds.\n", context->authCacheTimeout);
     }
 
   } else {
