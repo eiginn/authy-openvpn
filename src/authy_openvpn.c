@@ -13,6 +13,7 @@
 
 #include <stdarg.h>
 #include <assert.h>
+#include <time.h>
 #include <curl/curl.h>
 
 
@@ -33,11 +34,25 @@
  * PAM pam
  * pam = 1;
  */
+
+#define AUTHYID_LEN 16
+#define AUTHYTOKEN_LEN 16
+#define AUTHCACHE_MAX 1024
+#define AUTHCACHE_TIMEOUT 86400
+
+struct auth_cache {
+  char authyID[AUTHYID_LEN];
+  char authyToken[AUTHYTOKEN_LEN];
+  time_t timestamp;
+};
+
 struct plugin_context {
   char *pszApiUrl;
   char *pszApiKey;
   int bPAM;
   int verbosity;
+  struct auth_cache authCache[AUTHCACHE_MAX];
+  int authCacheCount;
 };
 
 
@@ -139,6 +154,9 @@ openvpn_plugin_open_v1(unsigned int *type_mask,
     context->bPAM = 1;
   }
 
+  /* reset auth cache */
+  context->authCacheCount = 0;
+
   /* Set type_mask, a.k.a callbacks that we want to intercept */
   *type_mask = OPENVPN_PLUGIN_MASK(OPENVPN_PLUGIN_AUTH_USER_PASS_VERIFY);
 
@@ -186,6 +204,74 @@ responseWasSuccessful(char *pszAuthyResponse)
 	return FAIL;
 }
 
+//
+// Find slot number in AuthCache for given Authy ID
+// return index >= 0 if found
+// return -1 for not existing
+//
+static int
+findAuthCacheSlot(struct plugin_context *context, char *pszAuthyId)
+{
+  int i;
+
+  for (i = 0; i < context->authCacheCount; i++) {
+    if (strncmp(context->authCache[i].authyID, pszAuthyId, AUTHYID_LEN) == 0) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+//
+// Update or add new cache slot with Authy ID, Token and current timestamp
+//
+static int
+updateAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken)
+{
+  int cacheSlot = findAuthCacheSlot(context, pszAuthyId);
+
+  if (-1 == cacheSlot) {
+    if (context->authCacheCount >= AUTHCACHE_MAX) {
+      trace(ERROR, __LINE__, "[Authy] AuthCache: max cache size of %d slots reached, cannot cache any more users.\n", AUTHCACHE_MAX);
+      return FAIL;
+    }
+
+    cacheSlot = context->authCacheCount;
+    context->authCacheCount++;
+
+    trace(INFO, __LINE__, "[Authy] AuthCache: added new slot #%d for authyID=%s.\n", cacheSlot, pszAuthyId);
+  }
+
+  strncpy(context->authCache[cacheSlot].authyID, pszAuthyId, AUTHYID_LEN);
+  strncpy(context->authCache[cacheSlot].authyToken, pszToken, AUTHYTOKEN_LEN);
+  context->authCache[cacheSlot].timestamp = time(NULL);
+
+  trace(INFO, __LINE__, "[Authy] AuthCache: updated slot #%d for authyID=%s with timestamp=%d.\n", 
+    cacheSlot, context->authCache[cacheSlot].authyID, context->authCache[cacheSlot].timestamp);
+
+  return OK;
+}
+
+//
+// Verify Token and valid timestamp for given Authy ID in AuthCache
+//
+static int
+verifyAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken)
+{
+  int cacheSlot = findAuthCacheSlot(context, pszAuthyId);
+
+  if (cacheSlot == -1) {
+    return FAIL;
+  }
+
+  if (time(NULL) - context->authCache[cacheSlot].timestamp < AUTHCACHE_TIMEOUT &&
+      strncmp(context->authCache[cacheSlot].authyToken, pszToken, AUTHYTOKEN_LEN) == 0) {
+    return OK;
+  }
+
+  return FAIL;
+}
 
 
 // Description
@@ -313,6 +399,15 @@ authenticate(struct plugin_context *context,
     pszToken = pszTokenStartPosition + 1;
   }
 
+  // Skip Authy Validation, if valid AuthCache entry is found
+  r = verifyAuthCache(context, pszAuthyId, pszToken);
+
+  if(SUCCESS(r)) {
+    trace(INFO, __LINE__,"[Authy] AuthCache: Valid cached auth found for authyID=%s.\n", pszAuthyId);
+    updateAuthCache(context, pszAuthyId, pszToken);
+    iAuthResult = OPENVPN_PLUGIN_FUNC_SUCCESS; //Two-Factor Auth was succesful
+    goto EXIT;
+  }
 
   trace(INFO, __LINE__, "[Authy] Authenticating username=%s, token=%s with AUTHY_ID=%s.\n", pszUsername, pszToken, pszAuthyId);
 
@@ -323,6 +418,8 @@ authenticate(struct plugin_context *context,
                   pszAuthyResponse);
 
   if (SUCCESS(r) && SUCCESS(responseWasSuccessful(pszAuthyResponse))){
+    // Update AuthCache
+    updateAuthCache(context, pszAuthyId, pszToken);
     iAuthResult = OPENVPN_PLUGIN_FUNC_SUCCESS; //Two-Factor Auth was succesful
     goto EXIT;
   }
