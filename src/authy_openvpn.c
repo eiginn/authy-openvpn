@@ -14,6 +14,7 @@
 #include <stdarg.h>
 #include <assert.h>
 #include <time.h>
+#include <errno.h>
 #include <curl/curl.h>
 
 
@@ -38,7 +39,6 @@
 #define AUTHYID_LEN 16
 #define AUTHYTOKEN_LEN 16
 #define AUTHCACHE_MAX 1024
-#define AUTHCACHE_TIMEOUT 86400
 
 struct auth_cache {
   char authyID[AUTHYID_LEN];
@@ -53,6 +53,7 @@ struct plugin_context {
   int verbosity;
   struct auth_cache authCache[AUTHCACHE_MAX];
   int authCacheCount;
+  long authCacheTimeout;
 };
 
 
@@ -152,6 +153,22 @@ openvpn_plugin_open_v1(unsigned int *type_mask,
 
   if (argv[3] && strncmp(argv[3], "pam", 3) == 0){
     context->bPAM = 1;
+  }
+
+  if (argv[4]){
+    errno = 0;
+    context->authCacheTimeout = strtol(argv[4], (char **)NULL, 10);
+
+    if(errno != 0 || context->authCacheTimeout < 0) {
+      trace(ERROR, __LINE__, "[Authy] AuthCache: incorrect AuthCache timeout value (parameter #4), AuthCache disabled.");
+      context->authCacheTimeout = 0;
+    } else {
+      trace(INFO, __LINE__, "[Authy] AuthCache: AuthCache activated, timeout set to %ld seconds.", context->authCacheTimeout);
+    }
+
+  } else {
+    // default: disable Auth Cache
+    context->authCacheTimeout = 0;
   }
 
   /* reset auth cache */
@@ -265,7 +282,7 @@ verifyAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken
     return FAIL;
   }
 
-  if (time(NULL) - context->authCache[cacheSlot].timestamp < AUTHCACHE_TIMEOUT &&
+  if (time(NULL) - context->authCache[cacheSlot].timestamp < context->authCacheTimeout &&
       strncmp(context->authCache[cacheSlot].authyToken, pszToken, AUTHYTOKEN_LEN) == 0) {
     return OK;
   }
@@ -399,14 +416,16 @@ authenticate(struct plugin_context *context,
     pszToken = pszTokenStartPosition + 1;
   }
 
-  // Skip Authy Validation, if valid AuthCache entry is found
-  r = verifyAuthCache(context, pszAuthyId, pszToken);
+  if(context->authCacheTimeout > 0) {
+    // Skip Authy Validation, if valid AuthCache entry is found
+    r = verifyAuthCache(context, pszAuthyId, pszToken);
 
-  if(SUCCESS(r)) {
-    trace(INFO, __LINE__,"[Authy] AuthCache: Valid cached auth found for authyID=%s.\n", pszAuthyId);
-    updateAuthCache(context, pszAuthyId, pszToken);
-    iAuthResult = OPENVPN_PLUGIN_FUNC_SUCCESS; //Two-Factor Auth was succesful
-    goto EXIT;
+    if(SUCCESS(r)) {
+      trace(INFO, __LINE__,"[Authy] AuthCache: Valid cached auth found for authyID=%s.\n", pszAuthyId);
+      updateAuthCache(context, pszAuthyId, pszToken);
+      iAuthResult = OPENVPN_PLUGIN_FUNC_SUCCESS; //Two-Factor Auth was succesful
+      goto EXIT;
+    }
   }
 
   trace(INFO, __LINE__, "[Authy] Authenticating username=%s, token=%s with AUTHY_ID=%s.\n", pszUsername, pszToken, pszAuthyId);
@@ -419,7 +438,9 @@ authenticate(struct plugin_context *context,
 
   if (SUCCESS(r) && SUCCESS(responseWasSuccessful(pszAuthyResponse))){
     // Update AuthCache
-    updateAuthCache(context, pszAuthyId, pszToken);
+    if(context->authCacheTimeout > 0) {
+      updateAuthCache(context, pszAuthyId, pszToken);
+    }
     iAuthResult = OPENVPN_PLUGIN_FUNC_SUCCESS; //Two-Factor Auth was succesful
     goto EXIT;
   }
