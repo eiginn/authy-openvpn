@@ -243,8 +243,8 @@ updateAuthCache(struct plugin_context *context, char *pszAuthyId, char *pszToken
     trace(INFO, __LINE__, "[Authy] AuthCache: added new slot #%d for authyID=%s.\n", cacheSlot, pszAuthyId);
   }
 
-  strncpy(context->authCache[cacheSlot].authyID, pszAuthyId, AUTHYID_LEN);
-  strncpy(context->authCache[cacheSlot].authyToken, pszToken, AUTHYTOKEN_LEN);
+  strncpy(context->authCache[cacheSlot].authyID, pszAuthyId, AUTHYID_LEN - 1);
+  strncpy(context->authCache[cacheSlot].authyToken, pszToken, AUTHYTOKEN_LEN - 1);
   context->authCache[cacheSlot].timestamp = time(NULL);
 
   trace(INFO, __LINE__, "[Authy] AuthCache: updated slot #%d for authyID=%s with timestamp=%d.\n", 
